@@ -65,3 +65,47 @@ not, with longjump aborts, ...).  The file `include/ustm.h` is
 generated automatically from `include/ustm_swiss.h` by setting the
 default declarations and running it through the preprocessor (see
 script `include/strip.sh`).    We advise just looking at `ustm.h`.
+
+## Bug fixes in this fork
+
+These fixes apply to upstream commit
+`5885a598e25e6cad6aa24601a41ab3e91254a209`.
+
+- **Write-filter bounds (`ustm.h`, `ustm_swiss.h`).** The filter has 10 bits,
+  but its hash produces indices from 0 to 1023. Subscripts outside the bitset
+  violate its bounds and can corrupt state. Allocating `1 << filterBits` bits
+  makes every possible hash index valid in both headers, while the existing
+  address map continues to resolve collisions.
+
+- **Invalid alignment (`uepoch.h`).** `epoch_state` requests 64-byte alignment
+  despite containing members requiring 256-byte alignment. Clang rejects this
+  declaration. Raising the enclosing alignment to 256 satisfies the members'
+  alignment requirements.
+
+- **Header linkage (`uepoch.h`).** Five externally linked function definitions
+  in the header cause multiple-definition errors when included in more than
+  one translation unit. Marking them inline permits their identical
+  definitions across translation units.
+
+- **Epoch ownership during exceptions (`uepoch.h`).** An exception from a
+  protected function or its result construction skips the original explicit
+  `unannounce()` call. A scope guard now releases the announcement during
+  unwinding as well as normal return. It records whether this call acquired
+  protection, so nested calls preserve the outer call's announcement.
+
+- **Epoch exit ordering (`uepoch.h`).** A relaxed inactive-marker store does
+  not publish completion of preceding protected accesses to the reclaimer.
+  Using a release store lets the scanner's existing acquire-capable loads
+  synchronize with an observed exit before reclamation.
+
+- **Thread-slot reuse and lifetime (`uepoch.h`).** Releasing a thread ID without
+  clearing its announcement leaves an old epoch in a reusable slot, potentially
+  blocking reclamation and preventing a new owner from announcing correctly.
+  The destructor now clears the announcement before releasing the ID. The
+  constructor initializes epoch state first, so it outlives the registered ID
+  even when `thread_id()` precedes the first protected call.
+
+- **Allocator storage on construction failure (`parlay/alloc.h`).** Placement
+  new does not return a pool block when an object's constructor throws.
+  `type_allocator<T>::create()` now retains the raw pointer, returns it through
+  the matching `free()` on construction failure, and rethrows the exception.
